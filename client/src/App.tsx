@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AppConfig, BookPlan, ChapterContent, GameNode } from './gameTypes';
+import type { AppConfig, Bible, BookPlan, ChapterContent, GameNode } from './gameTypes';
 import {
   chatComplete,
   chatMessageText,
@@ -114,17 +114,36 @@ export default function App() {
   }, []);
 
   const generateImagesForChapter = useCallback(
-    async (chapterIndex: number, chapter: ChapterContent, visualStyle: string) => {
+    async (
+      chapterIndex: number,
+      chapter: ChapterContent,
+      visualStyle: string,
+      bible: Bible,
+    ) => {
+      const charById = new Map(bible.characters.map((c) => [c.id, c]));
+      const sceneById = new Map(bible.scenes.map((s) => [s.id, s]));
+
       const jobs = chapter.nodes
         .filter((n) => n.imageImportant && n.scenePromptForImage && n.imageStatus !== 'done')
-        .map((n) => ({ nodeId: n.nodeId, prompt: n.scenePromptForImage }));
+        .map((n) => ({
+          nodeId: n.nodeId,
+          moment: n.scenePromptForImage,
+          scene: sceneById.get(n.sceneId),
+          characters: (n.npcIds || []).map((id) => charById.get(id)).filter(Boolean) as Bible['characters'],
+        }));
+
       jobs.forEach((j) => updateChapterNode(chapterIndex, j.nodeId, { imageStatus: 'loading' }));
 
       await runWithConcurrency(
         jobs,
         async (job) => {
           try {
-            const fullPrompt = composeImagePrompt(visualStyle, job.prompt);
+            const fullPrompt = composeImagePrompt({
+              visualStyle,
+              scene: job.scene,
+              characters: job.characters,
+              moment: job.moment,
+            });
             const res = await imageGenerate(cfgRef.current, fullPrompt);
             const url = firstImageDataUrl(res);
             if (!url) throw new Error('no image url');
@@ -200,7 +219,7 @@ export default function App() {
       next[idx] = cc;
       return next;
     });
-    void generateImagesForChapter(idx, cc, currentBook.visualStyle);
+    void generateImagesForChapter(idx, cc, currentBook.visualStyle, currentBook.bible);
     return cc;
   };
 

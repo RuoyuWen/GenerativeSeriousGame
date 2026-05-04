@@ -3,6 +3,8 @@ import { parseJsonObject } from './jsonExtract';
 import type {
   AppConfig,
   Bible,
+  BibleEntity,
+  BibleScene,
   BookPlan,
   ChapterContent,
   ChapterMeta,
@@ -156,11 +158,13 @@ export async function llmChapterNodes(opts: {
     '- imageImportant=false：narration 60–160 字（2–4 句，可稍微铺陈环境/内心）；dialogue 0–3 行，每行「角色：≤ 35 字」。',
     '- 不要长段落，不要重复圣经里的描述文字。',
     '',
-    'scenePromptForImage 规则：',
+    'scenePromptForImage 规则（关键改动）：',
     '- imageImportant=false 时，值必须为空字符串 ""。',
-    '- imageImportant=true 时，英文为主，≤ 50 词，内容只写**主体、动作、构图、情绪**与圣经里引用到的 id 的身份锚点（发色/服饰/关键道具/场景道具）；**不要写整体美术风格**（风格会由系统统一前置注入）。',
+    '- imageImportant=true 时：英文为主，≤ 30 词，**只描述「这一刻的动作、镜头/构图、情绪、关键瞬时道具或动作姿态」**。',
+    '- 严禁写：整体美术风格（系统会从 visualStyle 注入）；场景的固定外貌（系统会从 sceneId 注入）；角色的外貌/服饰/发色等身份特征（系统会从 npcIds 注入）。',
+    '- 因此理想形态像：`a tense hand reaches across the table, low-angle shot, dim warm rim light, close-up`。',
     '',
-    '一致性：npcIds、sceneId 必须引用 bible 现有 id；所有视觉描述都要与这些 id 的 imagePromptAnchors / visualAndPersonality 保持一致。',
+    '一致性：npcIds、sceneId 必须引用 bible 现有 id；身份信息只通过 id 引用，不要在 scenePromptForImage 里复述。',
     '',
     '输出 JSON schema：',
     '{"meta":<原样回声传入的 chapter>, "nodes":[{"nodeId":"N1","narration":"","dialogue":["角色：…"],"npcIds":[],"sceneId":"","imageImportant":true,"scenePromptForImage":"","choices":[{"id":"c1","label":"","nextNodeId":"N2A"}]}]}',
@@ -196,12 +200,43 @@ export async function llmChapterNodes(opts: {
   return { meta: parsed.meta ?? chapter, nodes };
 }
 
-export function composeImagePrompt(visualStyle: string, nodePrompt: string): string {
-  const style = (visualStyle || '').trim();
-  const body = (nodePrompt || '').trim();
-  if (!body) return style;
-  if (!style) return body;
-  return `${style}. Scene: ${body}. Keep the style consistent with the rest of the book.`;
+export interface ComposeImagePromptArgs {
+  visualStyle: string;
+  scene?: BibleScene;
+  characters?: BibleEntity[];
+  moment: string;
+}
+
+export function composeImagePrompt(args: ComposeImagePromptArgs): string {
+  const parts: string[] = [];
+
+  const style = (args.visualStyle || '').trim();
+  if (style) parts.push(`Art style (consistent across the entire book): ${style}.`);
+
+  if (args.scene) {
+    const anchors = (args.scene.imagePromptAnchors || '').trim();
+    const synopsis = (args.scene.synopsis || '').trim();
+    const sceneLine = [args.scene.name, anchors || synopsis].filter(Boolean).join(' — ');
+    if (sceneLine) parts.push(`Scene (keep identical across nodes that share this scene): ${sceneLine}.`);
+  }
+
+  const chars = (args.characters || []).filter((c) => !!c);
+  if (chars.length) {
+    const lines = chars.map((c) => {
+      const v = (c.visualAndPersonality || '').trim();
+      return `${c.name}${v ? ` — ${v}` : ''}`;
+    });
+    parts.push(`Characters present (must look the same as in earlier illustrations): ${lines.join('; ')}.`);
+  }
+
+  const moment = (args.moment || '').trim();
+  if (moment) parts.push(`Moment: ${moment}.`);
+
+  parts.push(
+    'Strictly preserve the established art style and character/scene identities. Do not change clothing, hair color, body type, palette, or rendering technique.',
+  );
+
+  return parts.join(' ');
 }
 
 export function coerceStructureId(n: unknown): StructureId | null {
