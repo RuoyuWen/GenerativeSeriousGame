@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w server\" \"npm run dev -w client\"",
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w server\" \"wait-on http://127.0.0.1:8787/api/health && npm run dev -w client\"",
     "build": "npm run build -w client",
     "start": "npm run start -w server"
   },
@@ -12,6 +12,7 @@
     "client"
   ],
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "wait-on": "^8.0.1"
   }
 }
